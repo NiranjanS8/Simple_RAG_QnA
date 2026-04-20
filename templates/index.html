@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RAG / QnA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;1,300&family=IBM+Plex+Sans:wght@300;400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d0d0d;
+      --surface: #141414;
+      --border: #2a2a2a;
+      --border-dim: #1e1e1e;
+      --text: #e8e4dc;
+      --muted: #888880;
+      --muted-mid: #555550;
+      --accent: #c8ff57;
+      --accent-dim: rgba(200, 255, 87, 0.08);
+      --accent-border: rgba(200, 255, 87, 0.22);
+      --red: #ff4444;
+      --mono: 'IBM Plex Mono', monospace;
+      --sans: 'IBM Plex Sans', sans-serif;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* subtle scanline overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.04) 2px,
+        rgba(0,0,0,0.04) 4px
+      );
+      pointer-events: none;
+      z-index: 999;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      min-height: 100vh;
+    }
+
+    /* ─── LEFT RAIL ─── */
+    .rail {
+      border-right: 1px solid var(--border);
+      padding: 32px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 40px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .brand-tag {
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .brand-name {
+      font-size: 20px;
+      font-weight: 500;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+
+    .brand-name span {
+      color: var(--accent);
+    }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+    }
+
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .step {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .step-num {
+      width: 20px;
+      height: 20px;
+      border: 1px solid var(--muted-mid);
+      border-radius: 2px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: var(--muted);
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .step-text strong {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 3px;
+    }
+
+    .step-text p {
+      font-size: 11px;
+      color: #7a7a72;
+      line-height: 1.5;
+    }
+
+    .rail-footer {
+      margin-top: auto;
+      font-size: 10px;
+      color: var(--muted-mid);
+      letter-spacing: 0.05em;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin-right: 6px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* ─── MAIN ─── */
+    .main {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* top bar */
+    .topbar {
+      padding: 16px 32px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .topbar-label {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .topbar-status {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* content area */
+    .content {
+      padding: 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      flex: 1;
+    }
+
+    /* ─── SECTIONS ─── */
+    .section {
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .section + .section {
+      margin-top: 16px;
+    }
+
+    .section-header {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border-dim);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface);
+    }
+
+    .section-label {
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #808078;
+      flex: 1;
+    }
+
+    .section-body {
+      padding: 16px;
+      background: var(--bg);
+    }
+
+    /* file upload */
+    .upload-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .file-input-wrap {
+      position: relative;
+      overflow: hidden;
+    }
+
+    input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    .file-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--surface);
+      font-family: var(--mono);
+      font-size: 12px;
+      color: #888880;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .file-label:hover {
+      border-color: var(--muted-mid);
+      color: var(--text);
+    }
+
+    .file-icon {
+      font-size: 14px;
+      opacity: 0.6;
+    }
+
+    /* buttons */
+    .btn {
+      padding: 10px 18px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--surface);
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .btn:hover {
+      border-color: var(--accent-border);
+      color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn-primary {
+      border-color: var(--accent-border);
+      color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    .btn-primary:hover {
+      background: rgba(200, 255, 87, 0.14);
+    }
+
+    .btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* output log */
+    .log {
+      font-size: 12px;
+      color: #999992;
+      padding: 12px 14px;
+      border: 1px solid var(--border-dim);
+      border-radius: 3px;
+      background: var(--surface);
+      min-height: 38px;
+      transition: color 0.2s;
+    }
+
+    .log.ok { color: var(--accent); }
+    .log.err { color: var(--red); }
+
+    .log::before {
+      content: '> ';
+      opacity: 0.4;
+    }
+
+    /* question textarea */
+    textarea {
+      width: 100%;
+      min-height: 90px;
+      resize: vertical;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--surface);
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    textarea:focus {
+      border-color: var(--muted-mid);
+    }
+
+    textarea::placeholder {
+      color: var(--muted-mid);
+    }
+
+    .ask-row {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 10px;
+    }
+
+    /* answer */
+    .answer-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .answer-text {
+      font-family: var(--sans);
+      font-size: 14px;
+      font-weight: 300;
+      line-height: 1.75;
+      color: var(--text);
+      min-height: 60px;
+      opacity: 0.9;
+    }
+
+    .answer-text.empty {
+      color: #888880;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .answer-text.thinking {
+      color: #888880;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .answer-text.thinking::after {
+      content: '█';
+      animation: blink 0.9s step-end infinite;
+    }
+
+    @keyframes blink {
+      50% { opacity: 0; }
+    }
+
+    .sources-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .source-tag {
+      padding: 4px 10px;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      color: #888880;
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      background: var(--surface);
+      font-family: var(--mono);
+    }
+
+    /* ─── RESPONSIVE ─── */
+    @media (max-width: 700px) {
+      .layout { grid-template-columns: 1fr; }
+      .rail {
+        position: static;
+        height: auto;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+        padding: 24px 20px;
+        gap: 24px;
+      }
+      .content { padding: 20px; }
+      .topbar { padding: 14px 20px; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- ── RAIL ── -->
+  <aside class="rail">
+    <div class="brand">
+      <span class="brand-tag">v0.1.0</span>
+      <div class="brand-name">rag<span>/</span>qna</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01</div>
+        <div class="step-text">
+          <strong>Index</strong>
+          <p>Upload PDFs. Content is split into chunks and stored in Chroma.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <div class="step-text">
+          <strong>Retrieve</strong>
+          <p>MMR search pulls the most relevant chunks from the vector store.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <div class="step-text">
+          <strong>Answer</strong>
+          <p>Mistral generates a response strictly grounded in the retrieved context.</p>
+        </div>
+      </div>
+    </div>
+
+
+  </aside>
+
+  <!-- ── MAIN ── -->
+  <div class="main">
+    <div class="topbar">
+      <span class="topbar-label">document q&amp;a</span>
+      <span class="topbar-status" id="topbar-status">—</span>
+    </div>
+
+    <div class="content">
+
+      <!-- UPLOAD -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-label">upload</span>
+        </div>
+        <div class="section-body">
+          <div class="upload-row">
+            <div class="file-input-wrap">
+              <input id="pdfs" type="file" accept="application/pdf" multiple />
+              <div class="file-label" id="file-label">
+                <span class="file-icon">⌁</span>
+                <span id="file-label-text">choose pdf files</span>
+              </div>
+            </div>
+            <button class="btn btn-primary" id="upload-btn">index files</button>
+          </div>
+          <div class="log" id="upload-log" style="margin-top:12px;">waiting for files.</div>
+        </div>
+      </div>
+
+      <!-- QUERY -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-label">query</span>
+        </div>
+        <div class="section-body">
+          <textarea id="question" placeholder="what is this document about?"></textarea>
+          <div class="ask-row">
+            <button class="btn" id="ask-btn">run query →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ANSWER -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-label">response</span>
+        </div>
+        <div class="section-body">
+          <div class="answer-wrap">
+            <div class="answer-text empty" id="answer">your answer will appear here.</div>
+            <div class="sources-row" id="sources"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  const pdfsInput    = document.getElementById('pdfs');
+  const fileLabelTxt = document.getElementById('file-label-text');
+  const uploadBtn    = document.getElementById('upload-btn');
+  const uploadLog    = document.getElementById('upload-log');
+  const questionEl   = document.getElementById('question');
+  const askBtn       = document.getElementById('ask-btn');
+  const answerEl     = document.getElementById('answer');
+  const sourcesEl    = document.getElementById('sources');
+  const topbarStatus = document.getElementById('topbar-status');
+
+  // file input label
+  pdfsInput.addEventListener('change', () => {
+    const n = pdfsInput.files.length;
+    fileLabelTxt.textContent = n === 0
+      ? 'choose pdf files'
+      : n === 1
+        ? pdfsInput.files[0].name
+        : `${n} files selected`;
+  });
+
+  // upload
+  uploadBtn.addEventListener('click', async () => {
+    if (!pdfsInput.files.length) {
+      setLog(uploadLog, 'no files selected.', 'err');
+      return;
+    }
+    uploadBtn.disabled = true;
+    setLog(uploadLog, 'indexing…', '');
+    topbarStatus.textContent = 'indexing…';
+
+    const fd = new FormData();
+    for (const f of pdfsInput.files) fd.append('files', f);
+
+    try {
+      const res = await fetch('/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'upload failed');
+      setLog(uploadLog, data.message, 'ok');
+      topbarStatus.textContent = 'indexed';
+      pdfsInput.value = '';
+      fileLabelTxt.textContent = 'choose pdf files';
+    } catch (e) {
+      setLog(uploadLog, e.message, 'err');
+      topbarStatus.textContent = 'error';
+    } finally {
+      uploadBtn.disabled = false;
+    }
+  });
+
+  // ask
+  askBtn.addEventListener('click', async () => {
+    const q = questionEl.value.trim();
+    if (!q) {
+      answerEl.className = 'answer-text empty';
+      answerEl.textContent = 'enter a question first.';
+      return;
+    }
+
+    askBtn.disabled = true;
+    answerEl.className = 'answer-text thinking';
+    answerEl.textContent = 'retrieving context ';
+    sourcesEl.innerHTML = '';
+    topbarStatus.textContent = 'thinking…';
+
+    try {
+      const res = await fetch('/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'query failed');
+
+      answerEl.className = 'answer-text';
+      answerEl.textContent = data.answer;
+      topbarStatus.textContent = 'done';
+
+      for (const s of data.sources) {
+        const tag = document.createElement('span');
+        tag.className = 'source-tag';
+        tag.textContent = s;
+        sourcesEl.appendChild(tag);
+      }
+    } catch (e) {
+      answerEl.className = 'answer-text';
+      answerEl.style.color = 'var(--red)';
+      answerEl.textContent = e.message;
+      topbarStatus.textContent = 'error';
+    } finally {
+      askBtn.disabled = false;
+    }
+  });
+
+  // enter to submit
+  questionEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) askBtn.click();
+  });
+
+  function setLog(el, msg, state) {
+    el.className = 'log' + (state ? ` ${state}` : '');
+    el.textContent = msg;
+  }
+</script>
+</body>
+</html>
